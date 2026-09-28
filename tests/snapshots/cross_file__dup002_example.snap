@@ -20,7 +20,7 @@ expression: diagnostics
       "end": 165
     },
     "fix": null,
-    "url": "https://github.com/scarletkc/seiso/blob/v0.1.0/docs/rules/DUP002.md",
+    "url": "https://github.com/scarletkc/seiso/blob/v[version]/docs/rules/DUP002.md",
     "related": [
       {
         "filename": "reference.md",

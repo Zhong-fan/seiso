@@ -20,7 +20,7 @@ expression: diagnostics
       "end": 150
     },
     "fix": null,
-    "url": "https://github.com/scarletkc/seiso/blob/v0.1.0/docs/rules/OWN001.md",
+    "url": "https://github.com/scarletkc/seiso/blob/v[version]/docs/rules/OWN001.md",
     "related": [
       {
         "filename": "reference.md",

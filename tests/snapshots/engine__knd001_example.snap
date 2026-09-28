@@ -20,7 +20,7 @@ expression: result.diagnostics
       "end": 20
     },
     "fix": null,
-    "url": "https://github.com/scarletkc/seiso/blob/v0.1.0/docs/rules/KND001.md",
+    "url": "https://github.com/scarletkc/seiso/blob/v[version]/docs/rules/KND001.md",
     "related": [],
     "suggestion": "Correct the YAML frontmatter so its kind declaration can be read."
   }
