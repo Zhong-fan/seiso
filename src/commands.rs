@@ -542,31 +542,35 @@ pub fn init() -> Result<u8, String> {
         }
         contents.push_str("]\n");
     }
-    contents.push_str("preview = false\n");
     contents.push_str(
-        "\n# Review these path mappings and declare other kinds in document frontmatter.\n",
+        "preview = false\n\n# Review these path mappings and declare other kinds in document frontmatter.\n",
     );
-    let mut kinds = Vec::<(String, &str)>::new();
-    for (filename, pattern, kind) in [
-        ("README.md", "**/README.md", "readme"),
-        ("CHANGELOG.md", "**/CHANGELOG.md", "changelog"),
-    ] {
-        if root.join(filename).is_file() {
-            kinds.push((pattern.to_owned(), kind));
-        }
-    }
-    for (directories, kind) in [
-        (&["docs/guides", "guides"][..], "howto"),
-        (&["docs/howto", "howto"][..], "howto"),
-        (&["docs/reference", "reference"][..], "reference"),
-        (&["docs/runbooks", "runbooks"][..], "runbook"),
-        (&["docs/adr", "adr"][..], "adr"),
-        (&["docs/plans", "plans"][..], "plan"),
-    ] {
-        for directory in directories.iter().filter(|path| root.join(path).is_dir()) {
-            kinds.push((format!("{directory}/**"), kind));
-        }
-    }
+    let mut kinds: Vec<(String, &str)> = [
+        ("**/README.md", "readme", root.join("README.md").is_file()),
+        (
+            "**/CHANGELOG.md",
+            "changelog",
+            root.join("CHANGELOG.md").is_file(),
+        ),
+        ("docs/guides/**", "howto", root.join("docs/guides").is_dir()),
+        ("docs/howto/**", "howto", root.join("docs/howto").is_dir()),
+        (
+            "docs/reference/**",
+            "reference",
+            root.join("docs/reference").is_dir(),
+        ),
+        (
+            "docs/runbooks/**",
+            "runbook",
+            root.join("docs/runbooks").is_dir(),
+        ),
+        ("docs/adr/**", "adr", root.join("docs/adr").is_dir()),
+        ("docs/plans/**", "plan", root.join("docs/plans").is_dir()),
+    ]
+    .into_iter()
+    .filter(|(_, _, exists)| *exists)
+    .map(|(path, kind, _)| (path.to_owned(), kind))
+    .collect();
     for name in ["CONTRIBUTING.md", "SECURITY.md", "SUPPORT.md"] {
         kinds.extend(
             community_files(&root, name)

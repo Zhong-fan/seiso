@@ -638,9 +638,6 @@ fn init_writes_at_the_repository_root_with_exclusions_and_community_kinds() {
     let root = workspace.path();
     std::fs::create_dir(root.join(".git")).unwrap();
     write(root, "docs/guides/setup.md", "# Setup\n");
-    write(root, "guides/standalone.md", "# Standalone guide\n");
-    write(root, "reference/api.md", "# API\n");
-    write(root, "docs/reference/configuration.md", "# Configuration\n");
     write(root, ".github/ISSUE_TEMPLATE/bug.md", "# Bug\n");
     write(root, ".github/pull_request_template.md", "# Changes\n");
     write(root, ".github/CONTRIBUTING.md", "# Contributing\n");
@@ -656,10 +653,7 @@ fn init_writes_at_the_repository_root_with_exclusions_and_community_kinds() {
         "\".github/ISSUE_TEMPLATE/**\"",
         "\".github/pull_request_template.md\"",
         "\"CODE_OF_CONDUCT.md\"",
-        "path = \"guides/**\"\nkind = \"howto\"",
         "path = \"docs/guides/**\"\nkind = \"howto\"",
-        "path = \"reference/**\"\nkind = \"reference\"",
-        "path = \"docs/reference/**\"\nkind = \"reference\"",
         "path = \".github/CONTRIBUTING.md\"\nkind = \"howto\"",
         "path = \"SECURITY.md\"\nkind = \"howto\"",
     ] {

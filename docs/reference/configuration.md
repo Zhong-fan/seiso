@@ -4,9 +4,9 @@ kind: reference
 
 # Configuration
 
-`seiso init` creates a starting configuration at the repository root.
-`seiso policy` shows effective settings and file policy; [checking documents](../guides/checking.md)
-covers commands and output. The accepted fields and defaults are defined by `Settings`,
+`seiso init` creates a starting configuration at the repository root. `seiso policy` shows effective
+settings and file policy; [checking documents](../guides/checking.md) covers commands and
+output. The accepted fields and defaults are defined by `Settings`,
 `LintSettings`, `DupSettings`, `PtrSettings`, and `Lexicon` in
 [`src/config/mod.rs`](../../src/config/mod.rs).
 
@@ -117,11 +117,9 @@ rules run; it does not change detection.
 ## Rule selection
 
 Selectors accept `ALL`, an implemented family such as `KND`, or an implemented
-full code such as `KND001`. `select` defaults to `ALL`; `lint.extend-select`
-appends selectors from the configuration inheritance chain. On the command
-line, `--select` replaces the effective configured list, and `--extend-select`
-adds selectors to it. `lint.extend-ignore` appends ignores, while
-`extend-exclude` appends excluded path patterns. Selection and ignore conflicts use the
+full code such as `KND001`. `select` defaults to `ALL`; `--select` replaces it
+and any `lint.extend-select` entries, and `--extend-select` adds selectors.
+Selection and ignore conflicts use the
 more specific entry; equal specificity favors ignore. Preview rules are then
 removed unless `preview = true` or `--preview` is set. Per-file ignores and
 kind applicability further restrict enabled rules. Suppression is applied
@@ -129,13 +127,10 @@ after diagnostics are produced.
 
 ```toml
 preview = false
-extend-exclude = ["generated/**"]
 
 [lint]
 select = ["ALL"]
-extend-select = ["PTR"]
 ignore = ["PTR003"]
-extend-ignore = ["KND002"]
 languages = ["en", "zh", "ja"]
 
 [lint.per-file-ignores]
