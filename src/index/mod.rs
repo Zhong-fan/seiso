@@ -7,7 +7,9 @@ use std::sync::{Arc, OnceLock};
 use crate::config::Config;
 use crate::diagnostics::Span;
 use crate::md::{BlockKind, Document, FragmentKind};
-use crate::paths::{LinkPathError, TargetStatus, local_link, local_target_status, select_target};
+use crate::paths::{
+    LinkPathError, Listings, TargetStatus, local_link, local_target_status, select_target,
+};
 use crate::rules::{PathStatus, WorkspaceFiles};
 use regex::Regex;
 use serde::Serialize;
@@ -26,10 +28,13 @@ pub struct IndexedFile {
 #[derive(Clone, Debug)]
 pub struct WorkspaceIndex {
     pub root: PathBuf,
-    pub files: Vec<IndexedFile>,
+    files: Vec<IndexedFile>,
     pub complete: bool,
     anchors: BTreeMap<String, OnceLock<AnchorIndex>>,
     inventory: Option<BTreeMap<String, InventoryEntryKind>>,
+    /// Inventory paths by their lowercase form, built on the first missing target.
+    lowercase_inventory: OnceLock<BTreeMap<String, String>>,
+    listings: Listings,
 }
 
 #[derive(Clone, Debug)]
@@ -85,6 +90,8 @@ impl WorkspaceIndex {
             complete,
             anchors,
             inventory: None,
+            lowercase_inventory: OnceLock::new(),
+            listings: Listings::default(),
         }
     }
 
@@ -93,6 +100,19 @@ impl WorkspaceIndex {
         self
     }
 
+    /// Borrow files in filename order without invalidating lookups or cached anchors.
+    /// To change the file set or its documents, construct a new index.
+    pub fn files(&self) -> &[IndexedFile] {
+        &self.files
+    }
+
+    /// Consume the index to recover its files without cloning their documents.
+    /// Cached anchors are discarded, so changed files require a new index.
+    pub fn into_files(self) -> Vec<IndexedFile> {
+        self.files
+    }
+
+    /// Look up an indexed file by its workspace-relative filename.
     pub fn file(&self, filename: &str) -> Option<&IndexedFile> {
         self.files
             .binary_search_by(|file| file.filename.as_str().cmp(filename))
@@ -144,15 +164,14 @@ impl WorkspaceIndex {
                 return result;
             }
         };
-        let (selected, status) = select_target(&link.locations, |location| {
+        let (location, status) = select_target(&self.root, &link.locations, |location| {
             self.target_status(&location.path, &location.target)
         });
-        let location = &link.locations[selected];
         let mut target = location.target.clone();
         result.target = Some(target.clone());
         result.anchor = link.anchor;
-        // Resolve native aliases only through filesystem identity. Lowercasing names
-        // would incorrectly merge distinct files on case-sensitive filesystems.
+        // Resolve symbolic-link aliases through filesystem identity. The target's
+        // spelling is already confirmed, so this cannot merge letter-case variants.
         if self.inventory.is_none()
             && matches!(status, TargetStatus::File)
             && self.file(&target).is_none()
@@ -174,7 +193,8 @@ impl WorkspaceIndex {
             }
             TargetStatus::File | TargetStatus::Unknown => LinkStatus::AnchorUnknown,
             TargetStatus::Directory => LinkStatus::Directory,
-            TargetStatus::Missing => LinkStatus::Missing,
+            // LNK001 reports the spelling.
+            TargetStatus::CaseMismatch(_) | TargetStatus::Missing => LinkStatus::Missing,
             TargetStatus::OutsideWorkspace => LinkStatus::OutsideWorkspace,
             TargetStatus::Unreadable(error) => {
                 result.error = Some(error);
@@ -201,13 +221,27 @@ impl WorkspaceIndex {
                 Some(InventoryEntryKind::File) => TargetStatus::File,
                 Some(InventoryEntryKind::Unknown) => TargetStatus::Unknown,
                 None if target.is_empty() => TargetStatus::Directory,
-                None => TargetStatus::Missing,
+                None => self
+                    .lowercase_inventory
+                    .get_or_init(|| {
+                        let mut paths = BTreeMap::new();
+                        for path in inventory.keys() {
+                            paths
+                                .entry(path.to_lowercase())
+                                .or_insert_with(|| path.clone());
+                        }
+                        paths
+                    })
+                    .get(&target.to_lowercase())
+                    .map_or(TargetStatus::Missing, |actual| {
+                        TargetStatus::CaseMismatch(actual.clone())
+                    }),
             };
         }
         match local_target_status(&self.root, path) {
             status @ (TargetStatus::OutsideWorkspace | TargetStatus::Unreadable(_)) => status,
             _ if self.file(target).is_some() => TargetStatus::File,
-            status => status,
+            status => self.listings.confirm(&self.root, path, status),
         }
     }
 
@@ -508,6 +542,35 @@ mod tests {
             enabled_rules: Vec::new(),
             config: Config::defaults(root).unwrap(),
         }
+    }
+
+    /// Owned files can be changed only after consuming and rebuilding the index.
+    #[test]
+    fn rebuilding_owned_files_restores_order_and_refreshes_anchors() {
+        let root = tempfile::tempdir().unwrap();
+        let index = WorkspaceIndex::new(
+            root.path().to_path_buf(),
+            vec![
+                file(root.path(), "b.md", "# Other\n"),
+                file(root.path(), "a.md", "# Before\n"),
+            ],
+            true,
+        );
+        assert_eq!(index.files()[0].filename, "a.md");
+        assert!(index.anchors("a.md").unwrap().contains("before"));
+        let original_document = Arc::clone(&index.files()[1].document);
+
+        let mut files = index.into_files();
+        assert!(Arc::ptr_eq(&original_document, &files[1].document));
+        files[0] = file(root.path(), "renamed.md", "# After\n");
+        let rebuilt = WorkspaceIndex::new(root.path().to_path_buf(), files, true);
+        assert_eq!(rebuilt.files()[0].filename, "b.md");
+        assert!(rebuilt.file("a.md").is_none());
+        assert!(rebuilt.anchors("a.md").is_none());
+        assert!(rebuilt.file("renamed.md").is_some());
+        let anchors = rebuilt.anchors("renamed.md").unwrap();
+        assert!(anchors.contains("after"));
+        assert!(!anchors.contains("before"));
     }
 
     /// File-only checks and a target lookup leave unrelated anchor indexes lazy.
