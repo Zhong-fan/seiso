@@ -119,6 +119,201 @@ fn stable_rules_run_by_default_and_respect_selection_ignores_and_generated() {
     assert_eq!(value(&generated), json!([]));
 }
 
+#[cfg(windows)]
+#[test]
+fn links_report_case_mismatches_and_resolve_anchors_using_the_actual_path() {
+    let workspace = workspace();
+    let root = workspace.path();
+    write(
+        root,
+        "index.md",
+        "# Index\n\n[Setup](DOCS/setup.md#install)\n",
+    );
+    write(root, "docs/setup.md", "# Setup\n\n## Install\n");
+
+    let output = run(
+        root,
+        &["check", "--select", "LNK", "--output-format", "json"],
+        None,
+    );
+
+    assert_eq!(output.status.code(), Some(1));
+    let diagnostics = value(&output);
+    assert_eq!(diagnostics.as_array().unwrap().len(), 1, "{diagnostics}");
+    assert_eq!(diagnostics[0]["code"], "LNK001");
+    assert!(diagnostics[0]["message"].as_str().unwrap().contains("case"));
+    assert!(
+        diagnostics[0]["suggestion"]
+            .as_str()
+            .unwrap()
+            .contains("docs/setup.md")
+    );
+    assert!(
+        diagnostics[0]["suggestion"]
+            .as_str()
+            .unwrap()
+            .contains("preserve its current relative or root-relative form")
+    );
+}
+
+#[cfg(windows)]
+#[test]
+fn unicode_case_matching_does_not_merge_multichar_folds() {
+    let workspace = workspace();
+    let root = workspace.path();
+    write(
+        root,
+        "index.md",
+        "# Index\n\n[Target](STRAßE.md#expected)\n",
+    );
+    write(root, "straße.md", "# Target\n\n## Expected\n");
+    write(root, "STRASSE.md", "# Other\n\n## Different\n");
+
+    assert!(root.join("straße.md").exists());
+    assert!(root.join("STRASSE.md").exists());
+
+    let output = run(
+        root,
+        &["check", "--select", "LNK", "--output-format", "json"],
+        None,
+    );
+
+    assert_eq!(output.status.code(), Some(1));
+    let diagnostics = value(&output);
+    assert_eq!(diagnostics.as_array().unwrap().len(), 1, "{diagnostics}");
+    assert_eq!(diagnostics[0]["code"], "LNK001");
+    assert!(
+        diagnostics[0]["suggestion"]
+            .as_str()
+            .unwrap()
+            .contains("straße.md")
+    );
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn unicode_normalization_keeps_valid_links_and_mixed_case_diagnostics() {
+    let workspace = workspace();
+    let root = workspace.path();
+    let decomposed = "cafe\u{301}.md";
+    write(
+        root,
+        "index.md",
+        &format!(
+            "# Index\n\n[Equivalent](docs/{decomposed}#good)\n\n[Same component](docs/CAFE\u{301}.md#good)\n\n[Mixed](DOCS/{decomposed}#missing)\n\n[Sigma](docs/Σ.md#good)\n"
+        ),
+    );
+    write(root, "docs/caf\u{e9}.md", "# Target\n\n## Good\n");
+    write(root, "docs/ς.md", "# Target\n\n## Good\n");
+
+    let output = run(
+        root,
+        &["check", "--select", "LNK", "--output-format", "json"],
+        None,
+    );
+
+    assert_eq!(output.status.code(), Some(1));
+    let diagnostics = value(&output);
+    let codes: Vec<_> = diagnostics
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|diagnostic| diagnostic["code"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        codes.iter().filter(|code| **code == "LNK001").count(),
+        3,
+        "{diagnostics}"
+    );
+    assert_eq!(
+        codes.iter().filter(|code| **code == "LNK002").count(),
+        1,
+        "{diagnostics}"
+    );
+    assert!(
+        diagnostics
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|diagnostic| diagnostic["code"] == "LNK001")
+            .all(|diagnostic| diagnostic["message"].as_str().unwrap().contains("case"))
+    );
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn unicode_canonical_case_mismatch_is_reported_on_macos() {
+    let workspace = workspace();
+    let root = workspace.path();
+    write(root, "index.md", "# Index\n\n[Target](\u{1fbc}.md)\n");
+    write(root, "\u{1fb3}.md", "# Target\n");
+
+    let output = run(
+        root,
+        &["check", "--select", "LNK", "--output-format", "json"],
+        None,
+    );
+
+    assert_eq!(output.status.code(), Some(1));
+    let diagnostics = value(&output);
+    assert_eq!(diagnostics.as_array().unwrap().len(), 1, "{diagnostics}");
+    assert_eq!(diagnostics[0]["code"], "LNK001");
+    assert!(
+        diagnostics[0]["suggestion"]
+            .as_str()
+            .unwrap()
+            .contains("\u{1fb3}.md")
+    );
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn links_on_case_sensitive_filesystems_keep_the_missing_target_diagnostic() {
+    let workspace = workspace();
+    let root = workspace.path();
+    write(root, "index.md", "# Index\n\n[Setup](DOCS/setup.md)\n");
+    write(root, "docs/setup.md", "# Setup\n");
+
+    let output = run(
+        root,
+        &["check", "--select", "LNK", "--output-format", "json"],
+        None,
+    );
+
+    assert_eq!(output.status.code(), Some(1));
+    let diagnostics = value(&output);
+    assert_eq!(diagnostics.as_array().unwrap().len(), 1, "{diagnostics}");
+    assert_eq!(diagnostics[0]["code"], "LNK001");
+    assert!(
+        diagnostics[0]["message"]
+            .as_str()
+            .unwrap()
+            .contains("does not exist")
+    );
+}
+
+#[test]
+fn exact_links_to_ignored_targets_remain_valid() {
+    let workspace = workspace();
+    let root = workspace.path();
+    write(root, ".gitignore", "build/\n");
+    write(
+        root,
+        "index.md",
+        "# Index\n\n[Generated file](build/output.bin)\n",
+    );
+    write(root, "build/output.bin", "generated\n");
+
+    let output = run(
+        root,
+        &["check", "--select", "LNK", "--output-format", "json"],
+        None,
+    );
+
+    assert_eq!(output.status.code(), Some(0));
+    assert_eq!(value(&output), json!([]));
+}
+
 #[test]
 fn selected_reports_are_deterministic_subsets_of_full_reports() {
     let workspace = workspace();

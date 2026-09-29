@@ -1,14 +1,17 @@
 //! Current workspace facts. Resolved paths and effective policy never enter the parse cache.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
 
 use crate::config::Config;
 use crate::diagnostics::Span;
 use crate::md::{BlockKind, Document, FragmentKind};
-use crate::paths::{LinkPathError, TargetStatus, local_link, local_target_status, select_target};
-use crate::rules::{PathStatus, WorkspaceFiles};
+use crate::paths::{
+    LinkPathError, PathSpellingCache, TargetStatus, local_link, select_target,
+    target_status_with_spelling,
+};
+use crate::rules::{PathStatus, WorkspaceFiles, WorkspaceTargetStatus};
 use regex::Regex;
 use serde::Serialize;
 
@@ -30,6 +33,8 @@ pub struct WorkspaceIndex {
     pub complete: bool,
     anchors: BTreeMap<String, OnceLock<AnchorIndex>>,
     inventory: Option<BTreeMap<String, InventoryEntryKind>>,
+    path_inventory: Option<HashSet<PathBuf>>,
+    path_spellings: PathSpellingCache,
 }
 
 #[derive(Clone, Debug)]
@@ -85,11 +90,19 @@ impl WorkspaceIndex {
             complete,
             anchors,
             inventory: None,
+            path_inventory: None,
+            path_spellings: PathSpellingCache::default(),
         }
     }
 
     pub fn with_inventory(mut self, inventory: BTreeMap<String, InventoryEntryKind>) -> Self {
         self.inventory = Some(inventory);
+        self
+    }
+
+    /// Record every path discovered by the filesystem walker, including non-Markdown entries.
+    pub fn with_path_inventory(mut self, paths: HashSet<PathBuf>) -> Self {
+        self.path_inventory = Some(paths);
         self
     }
 
@@ -144,11 +157,25 @@ impl WorkspaceIndex {
                 return result;
             }
         };
-        let (selected, status) = select_target(&link.locations, |location| {
+        let (selected, mut status) = select_target(&link.locations, |location| {
             self.target_status(&location.path, &location.target)
         });
         let location = &link.locations[selected];
         let mut target = location.target.clone();
+        status = match status {
+            TargetStatus::CaseMismatch {
+                actual,
+                is_directory,
+            } => {
+                target = actual;
+                if is_directory {
+                    TargetStatus::Directory
+                } else {
+                    TargetStatus::File
+                }
+            }
+            status => status,
+        };
         result.target = Some(target.clone());
         result.anchor = link.anchor;
         // Resolve native aliases only through filesystem identity. Lowercasing names
@@ -174,6 +201,7 @@ impl WorkspaceIndex {
             }
             TargetStatus::File | TargetStatus::Unknown => LinkStatus::AnchorUnknown,
             TargetStatus::Directory => LinkStatus::Directory,
+            TargetStatus::CaseMismatch { .. } => LinkStatus::AnchorUnknown,
             TargetStatus::Missing => LinkStatus::Missing,
             TargetStatus::OutsideWorkspace => LinkStatus::OutsideWorkspace,
             TargetStatus::Unreadable(error) => {
@@ -204,8 +232,15 @@ impl WorkspaceIndex {
                 None => TargetStatus::Missing,
             };
         }
-        match local_target_status(&self.root, path) {
-            status @ (TargetStatus::OutsideWorkspace | TargetStatus::Unreadable(_)) => status,
+        let exact_path = self.path_inventory.as_ref().is_some_and(|paths| {
+            path.strip_prefix(&self.root)
+                .ok()
+                .is_some_and(|relative| paths.contains(relative))
+        });
+        match target_status_with_spelling(&self.root, path, exact_path, &self.path_spellings) {
+            status @ (TargetStatus::OutsideWorkspace
+            | TargetStatus::Unreadable(_)
+            | TargetStatus::CaseMismatch { .. }) => status,
             _ if self.file(target).is_some() => TargetStatus::File,
             status => status,
         }
@@ -488,6 +523,19 @@ impl WorkspaceFiles for WorkspaceIndex {
     fn status(&self, _workspace_root: &Path, target: &Path) -> PathStatus {
         let Ok(relative) = target.strip_prefix(&self.root) else {
             return PathStatus::Unknown;
+        };
+        self.target_status(target, &relative.to_string_lossy().replace('\\', "/"))
+            .into()
+    }
+
+    fn status_with_cache(
+        &self,
+        _workspace_root: &Path,
+        target: &Path,
+        _cache: &PathSpellingCache,
+    ) -> WorkspaceTargetStatus {
+        let Ok(relative) = target.strip_prefix(&self.root) else {
+            return WorkspaceTargetStatus::Unknown;
         };
         self.target_status(target, &relative.to_string_lossy().replace('\\', "/"))
             .into()

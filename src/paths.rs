@@ -1,7 +1,15 @@
 //! Shared lexical paths and workspace-local link targets.
 
+use casefold::simple_fold_char;
+use std::collections::BTreeMap;
+use std::ffi::OsString;
 use std::io::ErrorKind;
 use std::path::{Component, Path, PathBuf};
+use std::sync::{Arc, Mutex};
+use unicode_normalization::UnicodeNormalization;
+
+type DirectoryNames = Result<Vec<OsString>, String>;
+type DirectoryCache = Arc<Mutex<BTreeMap<PathBuf, DirectoryNames>>>;
 
 /// Remove lexical `.` and `..` components without accessing the filesystem.
 pub fn normalize(path: impl AsRef<Path>) -> PathBuf {
@@ -221,14 +229,17 @@ pub(crate) fn select_target(
         match status(target) {
             TargetStatus::Missing => {}
             TargetStatus::Directory if target.route => {
-                directory.get_or_insert(index);
+                directory.get_or_insert((index, TargetStatus::Directory));
+            }
+            mismatch @ TargetStatus::CaseMismatch {
+                is_directory: true, ..
+            } if target.route => {
+                directory.get_or_insert((index, mismatch));
             }
             status => return (index, status),
         }
     }
-    directory.map_or((0, TargetStatus::Missing), |index| {
-        (index, TargetStatus::Directory)
-    })
+    directory.unwrap_or((0, TargetStatus::Missing))
 }
 
 fn is_template(value: &str) -> bool {
@@ -268,10 +279,151 @@ fn percent_decode(value: &str) -> Option<String> {
 pub(crate) enum TargetStatus {
     File,
     Directory,
+    CaseMismatch { actual: String, is_directory: bool },
     Missing,
     Unknown,
     OutsideWorkspace,
     Unreadable(String),
+}
+
+/// Reuse directory listings while resolving the on-disk spelling of existing paths.
+#[doc(hidden)]
+#[derive(Clone, Debug, Default)]
+pub struct PathSpellingCache {
+    directories: DirectoryCache,
+}
+
+impl PathSpellingCache {
+    pub(crate) fn actual_path(&self, root: &Path, target: &Path) -> Result<PathBuf, String> {
+        let root = normalize(root);
+        let target = normalize(target);
+        let relative = target
+            .strip_prefix(&root)
+            .map_err(|_| "target is not relative to the workspace".to_owned())?;
+        let mut actual = root.clone();
+        for component in relative.components() {
+            let Component::Normal(requested) = component else {
+                continue;
+            };
+            let names = self.directory_names(&actual)?;
+            let Some(name) = names
+                .iter()
+                .find(|name| name.as_os_str() == requested)
+                .or_else(|| {
+                    names.iter().find(|name| {
+                        let actual = name.to_string_lossy();
+                        let requested = requested.to_string_lossy();
+                        normalized_case_fold(&actual) == normalized_case_fold(&requested)
+                    })
+                })
+            else {
+                // Some filesystems resolve names that differ only by Unicode
+                // normalization, while directory enumeration preserves disk spelling.
+                // Keep traversing through that equivalent spelling so a known case
+                // mismatch in another component is not lost.
+                actual.push(requested);
+                continue;
+            };
+            actual.push(name);
+        }
+        Ok(actual)
+    }
+
+    fn directory_names(&self, directory: &Path) -> Result<Vec<OsString>, String> {
+        if let Some(names) = self
+            .directories
+            .lock()
+            .map_err(|_| "path spelling cache was poisoned".to_owned())?
+            .get(directory)
+            .cloned()
+        {
+            return names;
+        }
+        let names = std::fs::read_dir(directory)
+            .map_err(|error| format!("Cannot read directory {directory:?}: {error}"))?
+            .map(|entry| {
+                entry
+                    .map(|entry| entry.file_name())
+                    .map_err(|error| format!("Cannot read directory {directory:?}: {error}"))
+            })
+            .collect::<Result<Vec<_>, _>>();
+        self.directories
+            .lock()
+            .map_err(|_| "path spelling cache was poisoned".to_owned())?
+            .insert(directory.to_owned(), names.clone());
+        names
+    }
+}
+
+fn normalized_case_fold(value: &str) -> String {
+    value.nfd().map(simple_fold_char).nfc().collect()
+}
+
+fn has_case_mismatch(actual: &str, requested: &str) -> bool {
+    let actual: Vec<_> = actual.split('/').collect();
+    let requested: Vec<_> = requested.split('/').collect();
+    actual.len() == requested.len()
+        && actual.iter().zip(requested).any(|(actual, requested)| {
+            let actual_normalized: String = actual.nfc().collect();
+            let requested_normalized: String = requested.nfc().collect();
+            actual_normalized != requested_normalized
+                && normalized_case_fold(actual) == normalized_case_fold(requested)
+        })
+}
+
+/// Verify the spelling of an existing target; callers can bypass directory reads
+/// when discovery already recorded the exact relative path.
+pub(crate) fn target_status_with_spelling(
+    root: &Path,
+    target: &Path,
+    exact_path: bool,
+    cache: &PathSpellingCache,
+) -> TargetStatus {
+    let status = local_target_status(root, target);
+    let is_directory = match status {
+        TargetStatus::Directory => true,
+        TargetStatus::File => false,
+        _ => return status,
+    };
+    if exact_path {
+        return if is_directory {
+            TargetStatus::Directory
+        } else {
+            TargetStatus::File
+        };
+    }
+    let root = normalize(root);
+    let target = normalize(target);
+    let actual = match cache.actual_path(&root, &target) {
+        Ok(actual) => actual,
+        Err(error) => {
+            return TargetStatus::Unreadable(format!(
+                "Cannot verify link target spelling: {error}"
+            ));
+        }
+    };
+    let actual_relative = actual
+        .strip_prefix(&root)
+        .unwrap_or(&actual)
+        .to_string_lossy()
+        .replace('\\', "/");
+    let target_relative = target
+        .strip_prefix(&root)
+        .unwrap_or(&target)
+        .to_string_lossy()
+        .replace('\\', "/");
+    if !has_case_mismatch(&actual_relative, &target_relative) {
+        if is_directory {
+            TargetStatus::Directory
+        } else {
+            TargetStatus::File
+        }
+    } else {
+        TargetStatus::CaseMismatch {
+            actual: actual_relative,
+            is_directory,
+        }
+    }
 }
 
 /// Inspect the nearest existing ancestor before checking a possibly absent child.
@@ -432,5 +584,44 @@ mod tests {
             .take_while(|part| matches!(part, Component::Prefix(_) | Component::RootDir))
             .collect();
         assert_eq!(normalize(filesystem_root.join("../../..")), filesystem_root);
+    }
+
+    #[test]
+    fn path_spelling_cache_reads_a_directory_once_for_multiple_paths() {
+        let root = tempfile::tempdir().unwrap();
+        let first = root.path().join("first.md");
+        let second = root.path().join("second.md");
+        std::fs::write(&first, "").unwrap();
+        std::fs::write(&second, "").unwrap();
+
+        let cache = PathSpellingCache::default();
+        assert_eq!(cache.actual_path(root.path(), &first).unwrap(), first);
+        assert_eq!(cache.actual_path(root.path(), &second).unwrap(), second);
+        assert_eq!(cache.directories.lock().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn normalized_case_comparison_handles_composed_and_decomposed_unicode() {
+        assert_eq!(
+            normalized_case_fold("CAFÉ.md"),
+            normalized_case_fold("cafe\u{301}.md")
+        );
+        assert!(!has_case_mismatch("café.md", "cafe\u{301}.md"));
+        assert!(has_case_mismatch("café.md", "CAFE\u{301}.md"));
+        assert!(has_case_mismatch("ς.md", "Σ.md"));
+        assert_eq!(
+            normalized_case_fold("\u{1fbc}.md"),
+            normalized_case_fold("\u{1fb3}.md")
+        );
+        assert!(has_case_mismatch("\u{1fbc}.md", "\u{1fb3}.md"));
+        assert_eq!(
+            normalized_case_fold("\u{1c90}.md"),
+            normalized_case_fold("\u{10d0}.md")
+        );
+        assert!(has_case_mismatch("\u{1c90}.md", "\u{10d0}.md"));
+        assert_ne!(
+            normalized_case_fold("Maße.md"),
+            normalized_case_fold("MASSE.md")
+        );
     }
 }

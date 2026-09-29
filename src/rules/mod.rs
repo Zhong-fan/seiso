@@ -15,7 +15,7 @@ use crate::diagnostics::{Diagnostic, Span, sorted_diagnostics};
 use crate::md::{Document, FragmentKind};
 use serde::Serialize;
 
-pub use links::{LocalWorkspaceFiles, PathStatus, WorkspaceFiles};
+pub use links::{LocalWorkspaceFiles, PathStatus, WorkspaceFiles, WorkspaceTargetStatus};
 pub use suppression::SuppressionRecord;
 
 #[derive(Clone, Debug, Serialize)]

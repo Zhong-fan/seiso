@@ -278,7 +278,7 @@ fn excluded_target_anchors_remain_unknown_and_do_not_stale_suppressions() {
 
 #[cfg(windows)]
 #[test]
-fn case_insensitive_targets_still_validate_anchors_and_selected_related_paths() {
+fn case_insensitive_targets_report_case_and_selected_targets_keep_anchor_diagnostics() {
     let root = workspace(LINKS);
     write(root.path(), "target.md", "# Target\n");
     if !root.path().join("TARGET.md").exists() {
@@ -287,13 +287,26 @@ fn case_insensitive_targets_still_validate_anchors_and_selected_related_paths() 
     write(root.path(), "guide.md", "[Missing](TARGET.md#missing)\n");
     let full = run(root.path(), &["check", "--output-format", "json"], None);
     status(&full, 1);
-    assert_eq!(value(&full)[0]["code"], "LNK002");
+    let diagnostics = value(&full);
+    let codes: Vec<_> = diagnostics
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|diagnostic| diagnostic["code"].as_str().unwrap())
+        .collect();
+    assert_eq!(codes, ["LNK001", "LNK002"]);
     let selected = run(
         root.path(),
         &["check", "target.md", "--output-format", "json"],
         None,
     );
-    assert_eq!(selected.stdout, full.stdout);
+    let selected_diagnostics = value(&selected);
+    assert_eq!(selected_diagnostics.as_array().unwrap().len(), 1);
+    assert_eq!(selected_diagnostics[0]["code"], "LNK002");
+    assert_eq!(
+        selected_diagnostics[0]["related"][0]["filename"],
+        "target.md"
+    );
 }
 
 #[cfg(windows)]

@@ -1,6 +1,6 @@
 //! Discover and load the inputs needed by an inspection or a check.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -182,6 +182,7 @@ pub fn load(cwd: &Path, options: &LoadOptions, scope: LoadScope) -> Result<Snaps
     let selected_path =
         |path: &Path| all_selected || requested.iter().any(|selected| path.starts_with(selected));
     let mut discovery_errors = Vec::new();
+    let mut path_inventory = HashSet::new();
     let walker = ignore::WalkBuilder::new(&root)
         .hidden(false)
         .follow_links(false)
@@ -197,6 +198,9 @@ pub fn load(cwd: &Path, options: &LoadOptions, scope: LoadScope) -> Result<Snaps
         match entry {
             Ok(entry) => {
                 let path = normalize(entry.path());
+                if let Ok(relative) = path.strip_prefix(&root) {
+                    path_inventory.insert(relative.to_owned());
+                }
                 if let Some(error) = entry.error() {
                     discovery_errors.push((
                         Some(path.clone()),
@@ -394,7 +398,8 @@ pub fn load(cwd: &Path, options: &LoadOptions, scope: LoadScope) -> Result<Snaps
         &excluded_inputs,
         &errors,
     );
-    let index = WorkspaceIndex::new(root, files, errors.is_empty());
+    let index =
+        WorkspaceIndex::new(root, files, errors.is_empty()).with_path_inventory(path_inventory);
     let mut snapshot = Snapshot {
         index,
         selected,
