@@ -105,13 +105,6 @@ pub struct RuleArgs {
     all: bool,
 }
 
-#[derive(Args, Default)]
-pub struct InitArgs {
-    /// Create a child configuration that extends the nearest parent configuration.
-    #[arg(long)]
-    extend: bool,
-}
-
 #[derive(Subcommand)]
 pub enum HookCommand {
     /// Read a Claude Code PostToolUse event from stdin.
@@ -511,46 +504,19 @@ fn render_rule(rule: &seiso::rules::Rule) -> String {
     output.trim_end().to_owned()
 }
 
-pub fn init(args: InitArgs) -> Result<u8, String> {
+pub fn init() -> Result<u8, String> {
     let cwd = current_dir()?;
     let workspace = Workspace::discover(&cwd, None).map_err(|error| error.to_string())?;
-    let (root, extension) = if args.extend {
-        let source = workspace.config.source.as_deref().ok_or_else(|| {
-            "`seiso init --extend` requires an existing parent configuration.".to_owned()
-        })?;
-        let source_directory = source.parent().ok_or_else(|| {
-            format!(
-                "Cannot determine the directory containing {}.",
-                source.display()
-            )
-        })?;
-        if source_directory == cwd {
-            return Err(format!(
-                "Configuration already exists at {}; run `seiso init --extend` from a child directory to create a nested configuration.",
-                source.display()
-            ));
-        }
-        let relative = relative_ancestor_path(&cwd, source)?;
-        (seiso::paths::normalize(&cwd), Some(relative))
-    } else {
-        if let Some(path) = workspace.config.source {
-            return Err(format!(
-                "Configuration already exists at {}; edit that file instead.",
-                path.display()
-            ));
-        }
-        // Without a configuration, discovery stops at the repository root.
-        (workspace.root, None)
-    };
+    if let Some(path) = workspace.config.source {
+        return Err(format!(
+            "Configuration already exists at {}; edit that file instead.",
+            path.display()
+        ));
+    }
+    // Without a configuration, discovery stops at the repository root.
+    let root = workspace.root;
     let quote = |value: &str| toml::Value::String(value.to_owned()).to_string();
-    let mut contents = String::new();
-    let is_extension = extension.is_some();
-    if let Some(extension) = extension {
-        contents.push_str(&format!("extend = {}\n\n", quote(&extension)));
-    }
-    if !is_extension {
-        contents.push_str("include = [\"**/*.md\", \"**/*.markdown\"]\n");
-    }
+    let mut contents = String::from("include = [\"**/*.md\", \"**/*.markdown\"]\n");
     let mut excludes: Vec<String> = [
         ".github/ISSUE_TEMPLATE",
         ".github/DISCUSSION_TEMPLATE",
@@ -566,22 +532,15 @@ pub fn init(args: InitArgs) -> Result<u8, String> {
     excludes.extend(community_files(&root, "PULL_REQUEST_TEMPLATE.md"));
     excludes.extend(community_files(&root, "CODE_OF_CONDUCT.md"));
     if !excludes.is_empty() {
-        let directive = if is_extension {
-            "extend-exclude"
-        } else {
-            "exclude"
-        };
-        contents.push_str(&format!(
-            "# Templates, dependencies, and adopted texts are not project documentation.\n{directive} = [\n"
-        ));
+        contents.push_str(
+            "# Templates, dependencies, and adopted texts are not project documentation.\nexclude = [\n",
+        );
         for pattern in &excludes {
             contents.push_str(&format!("  {},\n", quote(pattern)));
         }
         contents.push_str("]\n");
     }
-    if !is_extension {
-        contents.push_str("preview = false\n");
-    }
+    contents.push_str("preview = false\n");
     contents.push_str(
         "\n# Review these path mappings and declare other kinds in document frontmatter.\n",
     );
@@ -673,41 +632,6 @@ pub fn init(args: InitArgs) -> Result<u8, String> {
         "Created {created}. Review the suggested {suggestions}, then run `seiso check`.\n"
     ))?;
     Ok(0)
-}
-
-/// Build a config reference from a directory to a file in one of its ancestors.
-fn relative_ancestor_path(directory: &Path, target: &Path) -> Result<String, String> {
-    let target_directory = target.parent().ok_or_else(|| {
-        format!(
-            "Cannot determine the directory containing {}.",
-            target.display()
-        )
-    })?;
-    let mut current = directory;
-    let mut relative = PathBuf::new();
-    while current != target_directory {
-        if !current.starts_with(target_directory) {
-            return Err(format!(
-                "Configuration {} is not in a parent directory of {}.",
-                target.display(),
-                directory.display()
-            ));
-        }
-        relative.push("..");
-        current = current.parent().ok_or_else(|| {
-            format!(
-                "Cannot find a relative path from {} to {}.",
-                directory.display(),
-                target.display()
-            )
-        })?;
-    }
-    relative.push(
-        target
-            .file_name()
-            .ok_or_else(|| format!("Configuration path {} has no file name.", target.display()))?,
-    );
-    Ok(relative.to_string_lossy().replace('\\', "/"))
 }
 
 struct SiteSuggestion {

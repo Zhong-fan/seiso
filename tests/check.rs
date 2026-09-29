@@ -636,6 +636,9 @@ fn init_writes_at_the_repository_root_with_exclusions_and_community_kinds() {
     let root = workspace.path();
     std::fs::create_dir(root.join(".git")).unwrap();
     write(root, "docs/guides/setup.md", "# Setup\n");
+    write(root, "guides/standalone.md", "# Standalone guide\n");
+    write(root, "reference/api.md", "# API\n");
+    write(root, "docs/reference/configuration.md", "# Configuration\n");
     write(root, ".github/ISSUE_TEMPLATE/bug.md", "# Bug\n");
     write(root, ".github/pull_request_template.md", "# Changes\n");
     write(root, ".github/CONTRIBUTING.md", "# Contributing\n");
@@ -651,7 +654,10 @@ fn init_writes_at_the_repository_root_with_exclusions_and_community_kinds() {
         "\".github/ISSUE_TEMPLATE/**\"",
         "\".github/pull_request_template.md\"",
         "\"CODE_OF_CONDUCT.md\"",
+        "path = \"guides/**\"\nkind = \"howto\"",
         "path = \"docs/guides/**\"\nkind = \"howto\"",
+        "path = \"reference/**\"\nkind = \"reference\"",
+        "path = \"docs/reference/**\"\nkind = \"reference\"",
         "path = \".github/CONTRIBUTING.md\"\nkind = \"howto\"",
         "path = \"SECURITY.md\"\nkind = \"howto\"",
     ] {
@@ -714,131 +720,6 @@ fn init_suggests_sites_for_detected_documentation_generators() {
     assert!(!String::from_utf8_lossy(&output.stdout).contains("site entries"));
     let config = std::fs::read_to_string(workspace.path().join("seiso.toml")).unwrap();
     assert!(!config.contains("[[sites]]"), "{config}");
-}
-
-#[test]
-fn init_extend_creates_a_safe_child_config_for_only_its_subtree() {
-    let workspace = TempDir::new().unwrap();
-    let root = workspace.path();
-    std::fs::create_dir(root.join(".git")).unwrap();
-    write(
-        root,
-        "seiso.toml",
-        r#"
-include = [
-  'guides/**/*.md',
-  'docs/guides/**/*.md',
-  'reference/**/*.md',
-  'docs/reference/**/*.md',
-  'vendor/**/*.md',
-]
-exclude = ['guides/ignored.md']
-preview = true
-
-[lint]
-select = ['KND']
-"#,
-    );
-    write(root, "docs/guides/setup.md", "# Setup\n");
-    write(root, "docs/guides/ignored.md", "# Ignored\n");
-    write(root, "docs/docs/guides/tutorial.md", "# Tutorial\n");
-    write(root, "docs/reference/configuration.md", "# Configuration\n");
-    write(root, "docs/docs/reference/api.md", "# API\n");
-    write(root, "docs/vendor/copied.md", "# Copied\n");
-    write(root, "docs/outside.md", "# Outside the inherited include\n");
-
-    let child = root.join("docs");
-    let initialized = run(&child, &["init", "--extend"], None);
-    assert_eq!(initialized.status.code(), Some(0), "{initialized:?}");
-    let config = std::fs::read_to_string(child.join("seiso.toml")).unwrap();
-    assert!(config.starts_with("extend = \"../seiso.toml\"\n\n"));
-    assert!(config.contains("extend-exclude = ["), "{config}");
-    assert!(!config.contains("\ninclude = "), "{config}");
-    assert!(!config.contains("\nexclude = "), "{config}");
-    assert!(!config.contains("\npreview = "), "{config}");
-    assert!(config.contains("path = \"guides/**\"\nkind = \"howto\""));
-    assert!(config.contains("path = \"docs/guides/**\"\nkind = \"howto\""));
-    assert!(config.contains("path = \"reference/**\"\nkind = \"reference\""));
-    assert!(config.contains("path = \"docs/reference/**\"\nkind = \"reference\""));
-    assert!(!config.contains("vendor/copied.md"));
-
-    let policy = run(&child, &["policy"], None);
-    assert_eq!(
-        policy.status.code(),
-        Some(0),
-        "{}",
-        String::from_utf8_lossy(&policy.stderr)
-    );
-    let report = value(&policy);
-    let effective = report["configurations"]
-        .as_object()
-        .unwrap()
-        .values()
-        .next()
-        .unwrap();
-    assert_eq!(
-        effective["include"],
-        json!([
-            "guides/**/*.md",
-            "docs/guides/**/*.md",
-            "reference/**/*.md",
-            "docs/reference/**/*.md",
-            "vendor/**/*.md"
-        ])
-    );
-    assert_eq!(effective["preview"], true);
-    let effective_excludes = effective["exclude"].as_array().unwrap();
-    assert!(effective_excludes.contains(&json!("guides/ignored.md")));
-    assert!(effective_excludes.contains(&json!("vendor/**")));
-    assert_eq!(effective["lint"]["select"], json!(["KND"]));
-    assert!(
-        effective["kinds"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|mapping| { mapping["path"] == "guides/**" && mapping["kind"] == "howto" })
-    );
-    assert!(
-        report["files"].as_array().unwrap().iter().any(|file| {
-            file["filename"] == "guides/setup.md" && file["kind"]["value"] == "howto"
-        })
-    );
-    assert!(report["files"].as_array().unwrap().iter().any(|file| {
-        file["filename"] == "docs/guides/tutorial.md" && file["kind"]["value"] == "howto"
-    }));
-    let outside_file = report["files"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|file| file["filename"] == "outside.md")
-        .unwrap();
-    assert_eq!(outside_file["excluded"], "include");
-    let vendor_file = report["files"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|file| file["filename"] == "vendor/copied.md")
-        .unwrap();
-    assert_eq!(vendor_file["excluded"], "exclude");
-
-    let second = run(&child, &["init", "--extend"], None);
-    assert_eq!(second.status.code(), Some(2));
-    assert_eq!(
-        std::fs::read_to_string(child.join("seiso.toml")).unwrap(),
-        config
-    );
-}
-
-#[test]
-fn init_extend_requires_a_parent_configuration() {
-    let workspace = TempDir::new().unwrap();
-    let output = run(workspace.path(), &["init", "--extend"], None);
-    assert_eq!(output.status.code(), Some(2));
-    assert!(
-        String::from_utf8_lossy(&output.stderr)
-            .contains("requires an existing parent configuration")
-    );
-    assert!(!workspace.path().join("seiso.toml").exists());
 }
 
 #[test]

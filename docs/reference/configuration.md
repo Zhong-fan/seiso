@@ -4,9 +4,9 @@ kind: reference
 
 # Configuration
 
-`seiso init` creates a starting configuration. `seiso policy` shows effective
-settings and file policy; [checking documents](../guides/checking.md) covers commands and
-output. The accepted fields and defaults are defined by `Settings`,
+`seiso init` creates a starting configuration at the repository root.
+`seiso policy` shows effective settings and file policy; [checking documents](../guides/checking.md)
+covers commands and output. The accepted fields and defaults are defined by `Settings`,
 `LintSettings`, `DupSettings`, `PtrSettings`, and `Lexicon` in
 [`src/config/mod.rs`](../../src/config/mod.rs).
 
@@ -152,11 +152,3 @@ Rule documentation identifies each rule's thresholds and word-list options.
 The listed lexicon fields can be extended independently for English, Chinese, and Japanese;
 Chinese and Japanese matching does not require word segmentation. Thresholds
 are calibrated on tuning data under the [evaluation policy](../evaluation/policy.md).
-
-## Nested configuration initialization
-
-When a parent configuration exists, `seiso init` leaves it unchanged and exits
-with an error. From a child directory, `seiso init --extend` creates a new
-`seiso.toml` there with an `extend` path to the nearest parent configuration
-and suggestions based only on that subtree. It refuses to overwrite an
-existing configuration file.
