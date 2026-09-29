@@ -721,19 +721,45 @@ fn init_extend_creates_a_safe_child_config_for_only_its_subtree() {
     let workspace = TempDir::new().unwrap();
     let root = workspace.path();
     std::fs::create_dir(root.join(".git")).unwrap();
-    write(root, "seiso.toml", "[lint]\nselect = ['KND']\n");
+    write(
+        root,
+        "seiso.toml",
+        r#"
+include = [
+  'guides/**/*.md',
+  'docs/guides/**/*.md',
+  'reference/**/*.md',
+  'docs/reference/**/*.md',
+  'vendor/**/*.md',
+]
+exclude = ['guides/ignored.md']
+preview = true
+
+[lint]
+select = ['KND']
+"#,
+    );
     write(root, "docs/guides/setup.md", "# Setup\n");
+    write(root, "docs/guides/ignored.md", "# Ignored\n");
+    write(root, "docs/docs/guides/tutorial.md", "# Tutorial\n");
     write(root, "docs/reference/configuration.md", "# Configuration\n");
+    write(root, "docs/docs/reference/api.md", "# API\n");
     write(root, "docs/vendor/copied.md", "# Copied\n");
+    write(root, "docs/outside.md", "# Outside the inherited include\n");
 
     let child = root.join("docs");
     let initialized = run(&child, &["init", "--extend"], None);
     assert_eq!(initialized.status.code(), Some(0), "{initialized:?}");
     let config = std::fs::read_to_string(child.join("seiso.toml")).unwrap();
     assert!(config.starts_with("extend = \"../seiso.toml\"\n\n"));
+    assert!(config.contains("extend-exclude = ["), "{config}");
+    assert!(!config.contains("\ninclude = "), "{config}");
+    assert!(!config.contains("\nexclude = "), "{config}");
+    assert!(!config.contains("\npreview = "), "{config}");
     assert!(config.contains("path = \"guides/**\"\nkind = \"howto\""));
+    assert!(config.contains("path = \"docs/guides/**\"\nkind = \"howto\""));
     assert!(config.contains("path = \"reference/**\"\nkind = \"reference\""));
-    assert!(!config.contains("path = \"docs/guides/**\""));
+    assert!(config.contains("path = \"docs/reference/**\"\nkind = \"reference\""));
     assert!(!config.contains("vendor/copied.md"));
 
     let policy = run(&child, &["policy"], None);
@@ -750,6 +776,20 @@ fn init_extend_creates_a_safe_child_config_for_only_its_subtree() {
         .values()
         .next()
         .unwrap();
+    assert_eq!(
+        effective["include"],
+        json!([
+            "guides/**/*.md",
+            "docs/guides/**/*.md",
+            "reference/**/*.md",
+            "docs/reference/**/*.md",
+            "vendor/**/*.md"
+        ])
+    );
+    assert_eq!(effective["preview"], true);
+    let effective_excludes = effective["exclude"].as_array().unwrap();
+    assert!(effective_excludes.contains(&json!("guides/ignored.md")));
+    assert!(effective_excludes.contains(&json!("vendor/**")));
     assert_eq!(effective["lint"]["select"], json!(["KND"]));
     assert!(
         effective["kinds"]
@@ -763,6 +803,16 @@ fn init_extend_creates_a_safe_child_config_for_only_its_subtree() {
             file["filename"] == "guides/setup.md" && file["kind"]["value"] == "howto"
         })
     );
+    assert!(report["files"].as_array().unwrap().iter().any(|file| {
+        file["filename"] == "docs/guides/tutorial.md" && file["kind"]["value"] == "howto"
+    }));
+    let outside_file = report["files"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|file| file["filename"] == "outside.md")
+        .unwrap();
+    assert_eq!(outside_file["excluded"], "include");
     let vendor_file = report["files"]
         .as_array()
         .unwrap()

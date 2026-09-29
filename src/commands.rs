@@ -544,10 +544,13 @@ pub fn init(args: InitArgs) -> Result<u8, String> {
     };
     let quote = |value: &str| toml::Value::String(value.to_owned()).to_string();
     let mut contents = String::new();
+    let is_extension = extension.is_some();
     if let Some(extension) = extension {
         contents.push_str(&format!("extend = {}\n\n", quote(&extension)));
     }
-    contents.push_str("include = [\"**/*.md\", \"**/*.markdown\"]\n");
+    if !is_extension {
+        contents.push_str("include = [\"**/*.md\", \"**/*.markdown\"]\n");
+    }
     let mut excludes: Vec<String> = [
         ".github/ISSUE_TEMPLATE",
         ".github/DISCUSSION_TEMPLATE",
@@ -563,16 +566,24 @@ pub fn init(args: InitArgs) -> Result<u8, String> {
     excludes.extend(community_files(&root, "PULL_REQUEST_TEMPLATE.md"));
     excludes.extend(community_files(&root, "CODE_OF_CONDUCT.md"));
     if !excludes.is_empty() {
-        contents.push_str(
-            "# Templates, dependencies, and adopted texts are not project documentation.\nexclude = [\n",
-        );
+        let directive = if is_extension {
+            "extend-exclude"
+        } else {
+            "exclude"
+        };
+        contents.push_str(&format!(
+            "# Templates, dependencies, and adopted texts are not project documentation.\n{directive} = [\n"
+        ));
         for pattern in &excludes {
             contents.push_str(&format!("  {},\n", quote(pattern)));
         }
         contents.push_str("]\n");
     }
+    if !is_extension {
+        contents.push_str("preview = false\n");
+    }
     contents.push_str(
-        "preview = false\n\n# Review these path mappings and declare other kinds in document frontmatter.\n",
+        "\n# Review these path mappings and declare other kinds in document frontmatter.\n",
     );
     let mut kinds = Vec::<(String, &str)>::new();
     for (filename, pattern, kind) in [
@@ -591,7 +602,7 @@ pub fn init(args: InitArgs) -> Result<u8, String> {
         (&["docs/adr", "adr"][..], "adr"),
         (&["docs/plans", "plans"][..], "plan"),
     ] {
-        if let Some(directory) = directories.iter().find(|path| root.join(path).is_dir()) {
+        for directory in directories.iter().filter(|path| root.join(path).is_dir()) {
             kinds.push((format!("{directory}/**"), kind));
         }
     }
