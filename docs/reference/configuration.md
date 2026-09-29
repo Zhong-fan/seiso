@@ -4,7 +4,7 @@ kind: reference
 
 # Configuration
 
-`seiso init` creates a starting configuration at the repository root. `seiso policy` shows effective
+`seiso init` creates a starting configuration. `seiso policy` shows effective
 settings and file policy; [checking documents](../guides/checking.md) covers commands and
 output. The accepted fields and defaults are defined by `Settings`,
 `LintSettings`, `DupSettings`, `PtrSettings`, and `Lexicon` in
@@ -18,6 +18,11 @@ Parent configurations are not implicitly merged. `extend = "path/to/base.toml"`
 opts into inheritance; the path is relative to the declaring configuration.
 Tables merge key by key. Arrays, including `include`, `exclude`, `[[kinds]]`,
 and `lint.select`, replace the inherited value instead of adding to it.
+`extend-exclude`, `lint.extend-select`, and `lint.extend-ignore` are additive:
+their entries from each configuration in the inheritance chain are appended,
+in order, to the effective `exclude`, `lint.select`, and `lint.ignore` lists.
+If a child replaces one of those base arrays, the inherited additions still
+apply. `seiso policy` reports the effective lists.
 Effective glob patterns, including inherited patterns, are relative to the
 selected configuration's directory. `--config PATH` selects one configuration
 for every file; its glob patterns are relative to the workspace root.
@@ -112,8 +117,11 @@ rules run; it does not change detection.
 ## Rule selection
 
 Selectors accept `ALL`, an implemented family such as `KND`, or an implemented
-full code such as `KND001`. `select` defaults to `ALL`; `--select` replaces it,
-and `--extend-select` adds selectors. Selection and ignore conflicts use the
+full code such as `KND001`. `select` defaults to `ALL`; `lint.extend-select`
+appends selectors from the configuration inheritance chain. On the command
+line, `--select` replaces the effective configured list, and `--extend-select`
+adds selectors to it. `lint.extend-ignore` appends ignores, while
+`extend-exclude` appends excluded path patterns. Selection and ignore conflicts use the
 more specific entry; equal specificity favors ignore. Preview rules are then
 removed unless `preview = true` or `--preview` is set. Per-file ignores and
 kind applicability further restrict enabled rules. Suppression is applied
@@ -121,10 +129,13 @@ after diagnostics are produced.
 
 ```toml
 preview = false
+extend-exclude = ["generated/**"]
 
 [lint]
 select = ["ALL"]
+extend-select = ["PTR"]
 ignore = ["PTR003"]
+extend-ignore = ["KND002"]
 languages = ["en", "zh", "ja"]
 
 [lint.per-file-ignores]
@@ -141,3 +152,11 @@ Rule documentation identifies each rule's thresholds and word-list options.
 The listed lexicon fields can be extended independently for English, Chinese, and Japanese;
 Chinese and Japanese matching does not require word segmentation. Thresholds
 are calibrated on tuning data under the [evaluation policy](../evaluation/policy.md).
+
+## Nested configuration initialization
+
+When a parent configuration exists, `seiso init` leaves it unchanged and exits
+with an error. From a child directory, `seiso init --extend` creates a new
+`seiso.toml` there with an `extend` path to the nearest parent configuration
+and suggestions based only on that subtree. It refuses to overwrite an
+existing configuration file.

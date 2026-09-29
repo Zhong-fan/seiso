@@ -717,6 +717,81 @@ fn init_suggests_sites_for_detected_documentation_generators() {
 }
 
 #[test]
+fn init_extend_creates_a_safe_child_config_for_only_its_subtree() {
+    let workspace = TempDir::new().unwrap();
+    let root = workspace.path();
+    std::fs::create_dir(root.join(".git")).unwrap();
+    write(root, "seiso.toml", "[lint]\nselect = ['KND']\n");
+    write(root, "docs/guides/setup.md", "# Setup\n");
+    write(root, "docs/reference/configuration.md", "# Configuration\n");
+    write(root, "docs/vendor/copied.md", "# Copied\n");
+
+    let child = root.join("docs");
+    let initialized = run(&child, &["init", "--extend"], None);
+    assert_eq!(initialized.status.code(), Some(0), "{initialized:?}");
+    let config = std::fs::read_to_string(child.join("seiso.toml")).unwrap();
+    assert!(config.starts_with("extend = \"../seiso.toml\"\n\n"));
+    assert!(config.contains("path = \"guides/**\"\nkind = \"howto\""));
+    assert!(config.contains("path = \"reference/**\"\nkind = \"reference\""));
+    assert!(!config.contains("path = \"docs/guides/**\""));
+    assert!(!config.contains("vendor/copied.md"));
+
+    let policy = run(&child, &["policy"], None);
+    assert_eq!(
+        policy.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&policy.stderr)
+    );
+    let report = value(&policy);
+    let effective = report["configurations"]
+        .as_object()
+        .unwrap()
+        .values()
+        .next()
+        .unwrap();
+    assert_eq!(effective["lint"]["select"], json!(["KND"]));
+    assert!(
+        effective["kinds"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|mapping| { mapping["path"] == "guides/**" && mapping["kind"] == "howto" })
+    );
+    assert!(
+        report["files"].as_array().unwrap().iter().any(|file| {
+            file["filename"] == "guides/setup.md" && file["kind"]["value"] == "howto"
+        })
+    );
+    let vendor_file = report["files"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|file| file["filename"] == "vendor/copied.md")
+        .unwrap();
+    assert_eq!(vendor_file["excluded"], "exclude");
+
+    let second = run(&child, &["init", "--extend"], None);
+    assert_eq!(second.status.code(), Some(2));
+    assert_eq!(
+        std::fs::read_to_string(child.join("seiso.toml")).unwrap(),
+        config
+    );
+}
+
+#[test]
+fn init_extend_requires_a_parent_configuration() {
+    let workspace = TempDir::new().unwrap();
+    let output = run(workspace.path(), &["init", "--extend"], None);
+    assert_eq!(output.status.code(), Some(2));
+    assert!(
+        String::from_utf8_lossy(&output.stderr)
+            .contains("requires an existing parent configuration")
+    );
+    assert!(!workspace.path().join("seiso.toml").exists());
+}
+
+#[test]
 fn explicit_configuration_keeps_the_repository_root_and_applies_patterns_from_it() {
     let workspace = TempDir::new().unwrap();
     let root = workspace.path();

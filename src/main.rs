@@ -35,8 +35,8 @@ enum Command {
     Index(commands::IndexArgs),
     /// Print a rule's explanation and examples.
     Rule(commands::RuleArgs),
-    /// Create a repository-root configuration with suggested exclusions and kind mappings.
-    Init,
+    /// Create a configuration with suggested exclusions and kind mappings.
+    Init(commands::InitArgs),
     /// Adapt editor events to Markdown checks.
     Hook {
         #[command(subcommand)]
@@ -105,7 +105,7 @@ fn run(cli: Cli) -> Result<u8, String> {
         Command::Policy(args) => commands::policy(args),
         Command::Index(args) => commands::index(args),
         Command::Rule(args) => commands::rule(args),
-        Command::Init => commands::init(),
+        Command::Init(args) => commands::init(args),
         Command::Hook { command } => Ok(commands::hook(command)),
     }
 }

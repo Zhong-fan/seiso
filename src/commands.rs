@@ -105,6 +105,13 @@ pub struct RuleArgs {
     all: bool,
 }
 
+#[derive(Args, Default)]
+pub struct InitArgs {
+    /// Create a child configuration that extends the nearest parent configuration.
+    #[arg(long)]
+    extend: bool,
+}
+
 #[derive(Subcommand)]
 pub enum HookCommand {
     /// Read a Claude Code PostToolUse event from stdin.
@@ -504,19 +511,43 @@ fn render_rule(rule: &seiso::rules::Rule) -> String {
     output.trim_end().to_owned()
 }
 
-pub fn init() -> Result<u8, String> {
+pub fn init(args: InitArgs) -> Result<u8, String> {
     let cwd = current_dir()?;
     let workspace = Workspace::discover(&cwd, None).map_err(|error| error.to_string())?;
-    if let Some(path) = workspace.config.source {
-        return Err(format!(
-            "Configuration already exists at {}; edit that file instead.",
-            path.display()
-        ));
-    }
-    // Without a configuration, discovery stops at the repository root.
-    let root = workspace.root;
+    let (root, extension) = if args.extend {
+        let source = workspace.config.source.as_deref().ok_or_else(|| {
+            "`seiso init --extend` requires an existing parent configuration.".to_owned()
+        })?;
+        let source_directory = source.parent().ok_or_else(|| {
+            format!(
+                "Cannot determine the directory containing {}.",
+                source.display()
+            )
+        })?;
+        if source_directory == cwd {
+            return Err(format!(
+                "Configuration already exists at {}; run `seiso init --extend` from a child directory to create a nested configuration.",
+                source.display()
+            ));
+        }
+        let relative = relative_ancestor_path(&cwd, source)?;
+        (seiso::paths::normalize(&cwd), Some(relative))
+    } else {
+        if let Some(path) = workspace.config.source {
+            return Err(format!(
+                "Configuration already exists at {}; edit that file instead.",
+                path.display()
+            ));
+        }
+        // Without a configuration, discovery stops at the repository root.
+        (workspace.root, None)
+    };
     let quote = |value: &str| toml::Value::String(value.to_owned()).to_string();
-    let mut contents = String::from("include = [\"**/*.md\", \"**/*.markdown\"]\n");
+    let mut contents = String::new();
+    if let Some(extension) = extension {
+        contents.push_str(&format!("extend = {}\n\n", quote(&extension)));
+    }
+    contents.push_str("include = [\"**/*.md\", \"**/*.markdown\"]\n");
     let mut excludes: Vec<String> = [
         ".github/ISSUE_TEMPLATE",
         ".github/DISCUSSION_TEMPLATE",
@@ -543,32 +574,27 @@ pub fn init() -> Result<u8, String> {
     contents.push_str(
         "preview = false\n\n# Review these path mappings and declare other kinds in document frontmatter.\n",
     );
-    let mut kinds: Vec<(String, &str)> = [
-        ("**/README.md", "readme", root.join("README.md").is_file()),
-        (
-            "**/CHANGELOG.md",
-            "changelog",
-            root.join("CHANGELOG.md").is_file(),
-        ),
-        ("docs/guides/**", "howto", root.join("docs/guides").is_dir()),
-        ("docs/howto/**", "howto", root.join("docs/howto").is_dir()),
-        (
-            "docs/reference/**",
-            "reference",
-            root.join("docs/reference").is_dir(),
-        ),
-        (
-            "docs/runbooks/**",
-            "runbook",
-            root.join("docs/runbooks").is_dir(),
-        ),
-        ("docs/adr/**", "adr", root.join("docs/adr").is_dir()),
-        ("docs/plans/**", "plan", root.join("docs/plans").is_dir()),
-    ]
-    .into_iter()
-    .filter(|(_, _, exists)| *exists)
-    .map(|(path, kind, _)| (path.to_owned(), kind))
-    .collect();
+    let mut kinds = Vec::<(String, &str)>::new();
+    for (filename, pattern, kind) in [
+        ("README.md", "**/README.md", "readme"),
+        ("CHANGELOG.md", "**/CHANGELOG.md", "changelog"),
+    ] {
+        if root.join(filename).is_file() {
+            kinds.push((pattern.to_owned(), kind));
+        }
+    }
+    for (directories, kind) in [
+        (&["docs/guides", "guides"][..], "howto"),
+        (&["docs/howto", "howto"][..], "howto"),
+        (&["docs/reference", "reference"][..], "reference"),
+        (&["docs/runbooks", "runbooks"][..], "runbook"),
+        (&["docs/adr", "adr"][..], "adr"),
+        (&["docs/plans", "plans"][..], "plan"),
+    ] {
+        if let Some(directory) = directories.iter().find(|path| root.join(path).is_dir()) {
+            kinds.push((format!("{directory}/**"), kind));
+        }
+    }
     for name in ["CONTRIBUTING.md", "SECURITY.md", "SUPPORT.md"] {
         kinds.extend(
             community_files(&root, name)
@@ -631,6 +657,41 @@ pub fn init() -> Result<u8, String> {
         "Created {created}. Review the suggested {suggestions}, then run `seiso check`.\n"
     ))?;
     Ok(0)
+}
+
+/// Build a config reference from a directory to a file in one of its ancestors.
+fn relative_ancestor_path(directory: &Path, target: &Path) -> Result<String, String> {
+    let target_directory = target.parent().ok_or_else(|| {
+        format!(
+            "Cannot determine the directory containing {}.",
+            target.display()
+        )
+    })?;
+    let mut current = directory;
+    let mut relative = PathBuf::new();
+    while current != target_directory {
+        if !current.starts_with(target_directory) {
+            return Err(format!(
+                "Configuration {} is not in a parent directory of {}.",
+                target.display(),
+                directory.display()
+            ));
+        }
+        relative.push("..");
+        current = current.parent().ok_or_else(|| {
+            format!(
+                "Cannot find a relative path from {} to {}.",
+                directory.display(),
+                target.display()
+            )
+        })?;
+    }
+    relative.push(
+        target
+            .file_name()
+            .ok_or_else(|| format!("Configuration path {} has no file name.", target.display()))?,
+    );
+    Ok(relative.to_string_lossy().replace('\\', "/"))
 }
 
 struct SiteSuggestion {
