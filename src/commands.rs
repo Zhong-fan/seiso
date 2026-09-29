@@ -1,5 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet};
-use std::fs::{self, OpenOptions};
+use std::fs;
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 
@@ -642,18 +642,23 @@ pub fn init(args: InitArgs) -> Result<u8, String> {
         }
     }
     let path = root.join("seiso.toml");
-    let mut file = OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(&path)
-        .map_err(|error| {
-            format!(
-                "Cannot create {}: {error}; preserve or edit the existing configuration.",
-                path.display()
-            )
-        })?;
-    file.write_all(contents.as_bytes())
+    let mut temporary = tempfile::NamedTempFile::new_in(&root).map_err(|error| {
+        format!(
+            "Cannot create {}: {error}; preserve or edit the existing configuration.",
+            path.display()
+        )
+    })?;
+    temporary
+        .write_all(contents.as_bytes())
+        .and_then(|()| temporary.flush())
         .map_err(|error| format!("Cannot write {}: {error}", path.display()))?;
+    temporary.persist_noclobber(&path).map_err(|error| {
+        format!(
+            "Cannot create {}: {}; preserve or edit the existing configuration.",
+            path.display(),
+            error.error
+        )
+    })?;
     let created = if root == seiso::paths::normalize(&cwd) {
         "seiso.toml".to_owned()
     } else {
