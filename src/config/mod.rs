@@ -776,13 +776,15 @@ fn overlay(base: &mut toml::Value, local: toml::Value) {
         (toml::Value::Table(base), toml::Value::Table(local)) => {
             for (key, value) in local {
                 match (base.get_mut(&key), value) {
-                    (Some(toml::Value::Array(inherited)), toml::Value::Array(mut additions))
+                    (Some(existing), toml::Value::Array(mut additions))
                         if matches!(
                             key.as_str(),
                             "extend-select" | "extend-ignore" | "extend-exclude"
                         ) =>
                     {
-                        inherited.append(&mut additions);
+                        if let toml::Value::Array(inherited) = existing {
+                            inherited.append(&mut additions);
+                        }
                     }
                     (Some(existing), value) => overlay(existing, value),
                     (None, value) => {

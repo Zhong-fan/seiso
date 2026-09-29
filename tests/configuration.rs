@@ -351,6 +351,27 @@ fn invalid_extension_selectors_are_rejected() {
 }
 
 #[test]
+fn invalid_inherited_extension_list_is_not_hidden_by_child_array() {
+    let dir = tempdir().unwrap();
+    write(dir.path(), "base.toml", "[lint]\nextend-select = 'DUP'\n");
+    write(
+        dir.path(),
+        "child/seiso.toml",
+        "extend = '../base.toml'\n[lint]\nextend-select = ['PTR']\n",
+    );
+
+    let error = Config::load(&dir.path().join("child/seiso.toml"))
+        .map(|_| ())
+        .expect_err("an invalid inherited extension list must be rejected");
+    assert!(matches!(error, ConfigError::Invalid { .. }));
+    assert!(
+        error
+            .to_string()
+            .contains("extend-select must be an array of strings")
+    );
+}
+
+#[test]
 fn recursive_extend_paths_use_each_declaring_directory() {
     let dir = tempdir().unwrap();
     write(dir.path(), "shared/base.toml", "preview = true");

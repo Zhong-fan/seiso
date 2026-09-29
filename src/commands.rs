@@ -1,6 +1,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::io::{self, Read, Write};
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
 use clap::{Args, Subcommand, ValueEnum};
@@ -601,7 +603,14 @@ pub fn init() -> Result<u8, String> {
         }
     }
     let path = root.join("seiso.toml");
-    let mut temporary = tempfile::NamedTempFile::new_in(&root).map_err(|error| {
+    let builder = tempfile::Builder::new();
+    #[cfg(unix)]
+    let builder = {
+        let mut builder = builder;
+        builder.permissions(std::fs::Permissions::from_mode(0o666));
+        builder
+    };
+    let mut temporary = builder.tempfile_in(&root).map_err(|error| {
         format!(
             "Cannot create {}: {error}; preserve or edit the existing configuration.",
             path.display()
