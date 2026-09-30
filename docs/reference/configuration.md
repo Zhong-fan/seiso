@@ -37,12 +37,12 @@ Git ignore policy. Unknown fields and unsupported selectors are errors.
 
 ## Kinds and domains
 
-Frontmatter supplies a document kind before path mappings. Kind names are
-lowercase and case-sensitive. An invalid
-declaration remains invalid instead of inheriting a fallback exemption.
-`generated` is available only through configuration. When multiple `[[kinds]]`
-entries match, the last wins. `[[domains]]` also uses the last matching entry;
-the workspace is the default comparison domain.
+Kind declaration and assignment are defined by `KIND-2` to `KIND-4` in the
+[specification](../../spec/convention.md#document-kinds); seiso expresses
+path mappings as `[[kinds]]` entries. Kind names are lowercase and
+case-sensitive. When multiple `[[kinds]]` entries match, the last wins.
+`[[domains]]` also uses the last matching entry; the workspace is the default
+comparison domain.
 
 ```toml
 include = ["**/*.md"]

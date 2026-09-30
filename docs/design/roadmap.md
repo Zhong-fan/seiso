@@ -5,7 +5,9 @@ kind: plan
 # Roadmap
 
 This page contains proposed work. Implemented behavior is described by the
-[convention](../reference/convention.md), [configuration reference](../reference/configuration.md),
+[specification](../../spec/convention.md),
+[how seiso checks the convention](../reference/convention.md),
+[configuration reference](../reference/configuration.md),
 [architecture](../reference/architecture.md), and `seiso rule --all`. The original phased
 proposal is preserved through the [design history](history.md).
 Milestone numbers describe evaluation stages and do not establish a published
@@ -68,9 +70,55 @@ or `--judge` option is chosen after the experiment establishes a useful result.
 An experiment can conclude without adopting a model backend; retain its
 measured result and decision as its acceptance record.
 
+## Convention specification
+
+The [Seiso Convention Specification](../../spec/convention.md) states the
+convention independently of the CLI, as explored in
+[#37](https://github.com/scarletkc/seiso/issues/37). It gives each requirement
+a stable identifier; the [worked examples](../../spec/examples.md) read those
+requirements against a small documentation set; and the
+[requirement coverage](../reference/convention.md#requirement-coverage) table
+maps each one to complete checks, partial checks, and judgments. The
+[adoption guide](../../spec/adopting.md) carries the instruction snippet for
+coding agents.
+
+Versions before 1.0.0 are released as changes are ready, and each can change
+requirements. The proposed criterion for 1.0.0 is evidence that an
+independent reader, or a small separate tool, interprets the worked examples
+from the specification alone, without inspecting the Rust implementation, and
+reaches seiso's results.
+Divergences, and places where the text depends on undocumented implementation
+behavior, are recorded against the specification before its wording changes.
+The exploration closes without a separate specification if the specification
+adds duplication or maintenance cost without improving clarity, independent
+adoption, or interoperability; improving the repository's own reference pages
+would then be the outcome.
+
+Planned work:
+
+- A GitHub Pages site built with VitePress from `spec/` at each `spec-v` tag,
+  with one path per version. Links that leave `spec/` point to the same tag,
+  and each requirement identifier gets an anchor.
+- Each seiso release states the specification version it checks in
+  `seiso --version`, in machine-readable output, and in its release notes. The
+  two version numbers are not aligned.
+
+Open questions:
+
+- Whether specification identifiers such as `POINTER-1` should be accepted as
+  exception codes alongside rule codes, so that an exception keeps its meaning
+  across checkers.
+- Whether ownership precedence beyond `canonical` and kind responsibilities
+  should become normative or remain checker policy.
+- Whether the specification needs an extension mechanism for custom kinds,
+  and whether tutorials need a kind of their own.
+- Whether the agent-instruction snippet also ships as a separate copyable
+  file.
+- Whether the specification needs Chinese and Japanese versions from the
+  start.
+
 ## Open design questions
 
-- Whether projects need custom kinds such as tutorials or agent instructions.
 - Whether versioned documentation trees need automatic comparison domains.
 - Whether MDX support justifies an additional parser surface.
 - Whether rule explanations should be distributed in Chinese and Japanese.
