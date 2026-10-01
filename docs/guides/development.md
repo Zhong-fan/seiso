@@ -120,6 +120,17 @@ checks, warm checks, and the warm hook including process startup. Preview
 rules are timed separately. Use a native Linux filesystem for local Linux
 measurements; the acceptance thresholds apply to the standard Linux CI runner.
 
+To isolate DUP003/OWN002 prefix sorting with mostly distinct prose shingles,
+run:
+
+```sh
+python -m scripts.evaluation.benchmark_prefix_sort --binary target/release/seiso
+```
+
+Pass `--baseline PATH` to compare a release binary with the same package version;
+the benchmark checks that their diagnostics match across cold, warm, no-cache,
+and selected-file runs.
+
 The [CI workflow](../../.github/workflows/ci.yml) runs on pull requests targeting
 `main` and pushes to `main`. Ordinary documentation changes run only the
 repository's document checks on Linux. Other changes and manual runs also
