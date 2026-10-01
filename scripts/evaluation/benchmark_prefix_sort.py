@@ -19,6 +19,7 @@ import time
 
 
 def fixture(workspace: Path, files: int) -> None:
+    """Write deterministic sparse prose with one duplicate pair for diagnostics."""
     (workspace / "seiso.toml").write_text(
         'include = ["**/*.md"]\npreview = true\n'
         '[[kinds]]\npath = "**/*.md"\nkind = "reference"\n',
@@ -45,6 +46,7 @@ def fixture(workspace: Path, files: int) -> None:
 def measure(
     binaries: dict[str, Path], workspaces: dict[str, Path], repeats: int
 ) -> dict[str, dict]:
+    """Compare timings and stable diagnostic hashes across four cache modes."""
     results = {name: {} for name in binaries}
     for mode in ("cold", "warm", "no-cache", "selected"):
         samples = {name: [] for name in binaries}
@@ -93,6 +95,7 @@ def measure(
 
 
 def main() -> None:
+    """Validate inputs and compare same-version binaries in isolated workspaces."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--binary", type=Path, required=True)
     parser.add_argument("--baseline", type=Path, help="same-version release binary to compare")
