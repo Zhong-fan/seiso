@@ -588,11 +588,11 @@ fn statistics_include_reasons_states_and_machine_outputs_remain_parseable() {
     status(&github, 1);
     let annotations = String::from_utf8_lossy(&github.stdout);
     assert_eq!(annotations.lines().count(), 1);
-    let filename = root
-        .path()
-        .join("guide.md")
-        .to_string_lossy()
-        .replace('\\', "/");
+    let filename = root.path().join("guide.md");
+    // Unix current_dir resolves directory symlinks, including macOS /var.
+    #[cfg(unix)]
+    let filename = filename.canonicalize().unwrap();
+    let filename = filename.to_string_lossy().replace('\\', "/");
     let filename = filename
         .replace('%', "%25")
         .replace('\r', "%0D")

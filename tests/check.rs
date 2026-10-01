@@ -145,10 +145,11 @@ fn github_annotations_use_absolute_paths_from_a_standalone_nested_workspace() {
     assert_eq!(from_root.status.code(), Some(1));
     assert_eq!(from_docs.status.code(), Some(1));
     assert_eq!(from_root.stdout, from_docs.stdout);
-    let filename = root
-        .join("docs/guides/a.md")
-        .to_string_lossy()
-        .replace('\\', "/");
+    let filename = root.join("docs/guides/a.md");
+    // Unix current_dir resolves directory symlinks, including macOS /var.
+    #[cfg(unix)]
+    let filename = filename.canonicalize().unwrap();
+    let filename = filename.to_string_lossy().replace('\\', "/");
     let escaped_filename = filename
         .replace('%', "%25")
         .replace('\r', "%0D")
@@ -158,7 +159,8 @@ fn github_annotations_use_absolute_paths_from_a_standalone_nested_workspace() {
     let expected = format!(
         "::error file={escaped_filename},line=3,endLine=3,title=LNK001,col=5,endColumn=25::"
     );
-    assert!(String::from_utf8_lossy(&from_docs.stdout).starts_with(&expected));
+    let annotations = String::from_utf8_lossy(&from_docs.stdout);
+    assert!(annotations.starts_with(&expected), "{annotations}");
 
     let json = run(
         &root.join("docs"),
