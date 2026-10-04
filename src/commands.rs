@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use clap::{Args, Subcommand, ValueEnum};
 use seiso::analysis::{self, Analysis};
-use seiso::config::{CliOverrides, Settings, Workspace};
+use seiso::config::{CliOverrides, Settings, Workspace, repository_root};
 use seiso::diagnostics::{
     Diagnostic, render_concise, render_github, render_json, render_sarif, render_text,
 };
@@ -164,16 +164,28 @@ fn render(evaluation: &Analysis, format: CheckFormat) -> Result<String, String> 
                 .iter()
                 .cloned()
                 .map(|mut diagnostic| {
-                    diagnostic.filename = root
-                        .join(&diagnostic.filename)
-                        .to_string_lossy()
-                        .replace('\\', "/");
+                    diagnostic.filename = github_filename(root, &diagnostic.filename);
+                    for related in &mut diagnostic.related {
+                        related.filename = github_filename(root, &related.filename);
+                    }
                     diagnostic
                 })
                 .collect::<Vec<_>>();
             Ok(render_github(&diagnostics))
         }
     }
+}
+
+/// Resolve an annotation location relative to its repository, or absolutely.
+fn github_filename(workspace_root: &Path, filename: &str) -> String {
+    let path = workspace_root.join(filename);
+    let repository = repository_root(path.parent().unwrap_or(workspace_root));
+    let reported = if repository.join(".git").exists() {
+        path.strip_prefix(&repository).unwrap_or(&path)
+    } else {
+        &path
+    };
+    reported.to_string_lossy().replace('\\', "/")
 }
 
 fn print_errors(snapshot: &Snapshot, github: bool) {

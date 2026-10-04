@@ -100,11 +100,11 @@ codes are `not_evaluated`; invalid or disabled codes retain their states. Add
 `index --dump` builds the index without running checks.
 
 SARIF includes primary and related locations and available safe fixes. GitHub
-output uses workflow annotations with absolute file paths, so annotations still
-point to the right checkout files when Seiso's workspace is a subdirectory.
-Text and JSON filenames remain workspace-relative. With `--statistics`, JSON
-becomes an object with `diagnostics` and `statistics`; SARIF stores statistics
-in run properties.
+output uses workflow annotations with primary and related paths relative to the
+Git repository root, or absolute paths when no repository contains the file.
+Text, concise, JSON, and SARIF report paths relative to the workspace.
+With `--statistics`, JSON becomes an object with `diagnostics` and `statistics`;
+SARIF stores statistics in run properties.
 Statistics include rule counts and suppression reasons and states. GitHub
 statistics go to stderr so stdout contains only annotation commands.
 
