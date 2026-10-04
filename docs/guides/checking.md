@@ -100,9 +100,10 @@ codes are `not_evaluated`; invalid or disabled codes retain their states. Add
 `index --dump` builds the index without running checks.
 
 SARIF includes primary and related locations and available safe fixes. GitHub
-output uses workflow annotations with primary and related paths relative to the
-Git repository root, or absolute paths when no repository contains the file.
-Text, concise, JSON, and SARIF report paths relative to the workspace.
+output uses workflow annotations with paths relative to the Git repository root.
+Other formats report paths relative to the workspace. GitHub uses the repository
+containing the workspace as the base for primary and related locations; outside
+a repository, it reports absolute paths.
 With `--statistics`, JSON becomes an object with `diagnostics` and `statistics`;
 SARIF stores statistics in run properties.
 Statistics include rule counts and suppression reasons and states. GitHub

@@ -176,10 +176,10 @@ fn render(evaluation: &Analysis, format: CheckFormat) -> Result<String, String> 
     }
 }
 
-/// Resolve an annotation location relative to its repository, or absolutely.
+/// Resolve an annotation location relative to the workspace checkout, or absolutely.
 fn github_filename(workspace_root: &Path, filename: &str) -> String {
     let path = workspace_root.join(filename);
-    let repository = repository_root(path.parent().unwrap_or(workspace_root));
+    let repository = repository_root(workspace_root);
     let reported = if repository.join(".git").exists() {
         path.strip_prefix(&repository).unwrap_or(&path)
     } else {

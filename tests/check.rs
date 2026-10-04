@@ -227,6 +227,39 @@ fn github_annotations_use_checkout_paths_and_related_locations() {
 }
 
 #[test]
+fn github_annotations_keep_nested_repository_paths_relative_to_the_workspace_checkout() {
+    let directory = workspace("preview=true\n[lint]\nselect=['PTR002']\n");
+    let root = directory.path();
+    std::fs::create_dir(root.join(".git")).unwrap();
+    write(root, "vendor/lib/.git", "gitdir: ../../metadata\n");
+    write(
+        root,
+        "vendor/lib/guide.md",
+        "---\nkind: howto\n---\nSee [the catalog](catalog/).\n",
+    );
+    write(
+        root,
+        "vendor/lib/catalog/entry.md",
+        "---\nkind: reference\n---\n# Entry\n",
+    );
+    let output = run(
+        root,
+        &["check", "--no-cache", "--output-format", "github"],
+        None,
+    );
+    assert_eq!(output.status.code(), Some(1));
+    let annotations = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        annotations.starts_with("::error file=vendor/lib/guide.md,"),
+        "{annotations}"
+    );
+    assert!(
+        annotations.contains("Related: vendor/lib/catalog:1:1:"),
+        "{annotations}"
+    );
+}
+
+#[test]
 fn github_annotations_without_a_repository_use_absolute_paths() {
     let directory = workspace("preview=true\n[lint]\nselect=['PTR002']\n");
     let root = directory.path();
